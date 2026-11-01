@@ -1,0 +1,22 @@
+[run]
+omit =
+    tests/*
+    deploy.py
+    scripts/*
+    bot.py
+    config.py
+    export_code.py
+    handlers/*
+    keyboards/*
+    states/*
+    utils/*
+    */__pycache__/*
+    .venv/*
+    venv/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__.:
+    raise NotImplementedError

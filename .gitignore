@@ -1,0 +1,37 @@
+# Environment variables
+.env
+**/.env
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database files
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Logs & PIDs
+*.log
+*.pid
+
+# Bot instances (private bot tokens, active databases, logs)
+instances/
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Test & Coverage
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
+
+# IDE & Editor settings
+.idea/
+.vscode/
+
