@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Hetzner Cloud Server Setup Script for Konkurs Bot Pro
+# Hetzner Cloud Server Setup Script for Konkurs Bot Pro (Webhook Edition)
 # Muallif: Antigravity & Nurulloh
 # Tavsif: Hetzner Cloud (Ubuntu 22.04 / 24.04 LTS) serverida loyihani 0 dan
-#         to'liq sozlash, kerakli paketlar, Redis, PM2, Python venv, Nginx va
+#         to'liq sozlash, kerakli paketlar, Redis, PM2, Python venv, Nginx Webhook va
 #         avtomatik backup tizimini o'rnatish.
 # ==============================================================================
 
@@ -44,6 +44,7 @@ REPO_URL="https://github.com/nurullo56/konkurs_pro_bot.git"
 
 echo -e "${BLUE}====================================================${NC}"
 echo -e "${BLUE}   🚀 HETZNER CLOUD: KONKURS BOT PRO AUTO SETUP     ${NC}"
+echo -e "${BLUE}   🌐 To'liq Webhook & Nginx integratsiyasi         ${NC}"
 echo -e "${BLUE}====================================================${NC}"
 
 # 2. Tizim paketlarini yangilash
@@ -142,6 +143,18 @@ fi
 mkdir -p "$PROJECT_DIR/instances"
 mkdir -p "$PROJECT_DIR/backups"
 mkdir -p "$PROJECT_DIR/logs"
+mkdir -p /var/www/html
+
+# Nginx boshlang'ich sinxronizatsiyasi
+"$PROJECT_DIR/venv/bin/python" "$PROJECT_DIR/scripts/deploy.py" sync-nginx || true
+
+# Nginx default saytini almashtirish
+if [[ -f "$PROJECT_DIR/nginx/default.conf" ]]; then
+    cp "$PROJECT_DIR/nginx/default.conf" /etc/nginx/sites-available/konkurs_bot.conf
+    ln -sf /etc/nginx/sites-available/konkurs_bot.conf /etc/nginx/sites-enabled/konkurs_bot.conf
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t && systemctl reload nginx || true
+fi
 
 # Har kungi 03:00 da avtomatik backup uchun Cron job qo'shish
 CRON_JOB="0 3 * * * $PROJECT_DIR/venv/bin/python $PROJECT_DIR/scripts/backup_db.py >> $PROJECT_DIR/logs/backup.log 2>&1"
@@ -157,16 +170,19 @@ echo -e "${GREEN}====================================================${NC}"
 echo -e "Loyiha joylashuvi: ${CYAN}$PROJECT_DIR${NC}"
 echo -e "Python muhiti:     ${CYAN}$PROJECT_DIR/venv${NC}"
 echo -e ""
+echo -e "🔐 SSL Sertifikat olish (bir marta domen uchun):"
+echo -e "   ${YELLOW}certbot --nginx -d DOMEN_NOMI${NC}"
+echo -e ""
 echo -e "📌 Foydali buyruqlar:"
-echo -e "  1. Yangi bot qo'shish:"
+echo -e "  1. Yangi Webhook bot qo'shish (Port va Nginx avtomatik ulanadi):"
 echo -e "     ${YELLOW}cd $PROJECT_DIR && ./venv/bin/python scripts/deploy.py add${NC}"
 echo -e ""
 echo -e "  2. Barcha botlarni ko'rish va boshqarish:"
-echo -e "     ${YELLOW}pm2 list${NC}   yoki   ${YELLOW}./venv/bin/python scripts/deploy.py list${NC}"
+echo -e "     ${YELLOW}pm2 list${NC}   yoki   ${YELLOW}./scripts/deploy_hetzner.sh status${NC}"
 echo -e ""
-echo -e "  3. Bot loglarini jonli kuzatish:"
+echo -e "  3. Nginx ni qayta sinxronlashtirish:"
+echo -e "     ${YELLOW}./venv/bin/python scripts/deploy.py sync-nginx${NC}"
+echo -e ""
+echo -e "  4. Bot loglarini jonli kuzatish:"
 echo -e "     ${YELLOW}pm2 logs${NC}"
-echo -e ""
-echo -e "  4. Loyihani yangilash:"
-echo -e "     ${YELLOW}./scripts/deploy_hetzner.sh update${NC}"
 echo -e "${GREEN}====================================================${NC}\n"

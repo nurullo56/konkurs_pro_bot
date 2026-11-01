@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -10,18 +11,25 @@ from pathlib import Path
 
 # Windows PowerShell cp1251 muammosini hal qilish — emoji to'g'ri chiqadi
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
-# deploy.py scripts/ papkasida yoki root'da bo'lishi mumkin.
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 _here = Path(__file__).resolve().parent
 if _here.name == "scripts":
     BASE_DIR = _here.parent
 else:
     BASE_DIR = _here
 
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 INSTANCES_DIR = BASE_DIR / "instances"
 BOT_SCRIPT = BASE_DIR / "bot.py"
+DEFAULT_DOMAIN = os.getenv("BASE_DOMAIN", "smart-tools.uk")
 
 
 def ensure_instances_dir() -> None:
@@ -30,7 +38,7 @@ def ensure_instances_dir() -> None:
 
 
 def is_pm2_available() -> bool:
-    """pm2 buyrugi mavjudligini tekshiradi."""
+    """pm2 buyrug'i mavjudligini tekshiradi."""
     return shutil.which("pm2") is not None
 
 
@@ -58,27 +66,83 @@ def parse_env_file(env_path: Path) -> dict[str, str]:
     return result
 
 
-def add_instance() -> None:
-    """Yangi bot instance qo'shadi: sozlamalarni so'rab .env yaratadi va ishga tushiradi."""
+def get_next_available_port(start_port: int = 8001) -> int:
+    """
+    Mavjud botlar orasidan foydalanilmagan keyingi bo'sh portni aniqlaydi.
+    """
     ensure_instances_dir()
-    print("\n➕ --- YANGI MIJOZ BOTINI QO'SHISH ---\n")
+    used_ports: set[int] = set()
+
+    for d in INSTANCES_DIR.iterdir():
+        if d.is_dir() and not d.name.startswith("__"):
+            env_file = d / ".env"
+            if env_file.exists():
+                env_data = parse_env_file(env_file)
+                port_str = env_data.get("WEBAPP_PORT", "")
+                if port_str.isdigit():
+                    used_ports.add(int(port_str))
+
+    port = start_port
+    while port in used_ports:
+        port += 1
+    return port
+
+
+def sync_nginx_safe(domain: str) -> None:
+    """Nginx konfiguratsiyasini yangilaydi (agar generate_nginx moduli mavjud bo'lsa)."""
+    try:
+        from nginx.generate_nginx import sync_nginx
+        sync_nginx(domain)
+    except Exception as e:
+        print(f"⚠️ Nginx konfiguratsiyasini yangilashda ogohlantirish: {e}")
+
+
+def add_instance() -> None:
+    """
+    Yangi bot instance qo'shadi:
+    - Bo'sh ichki portni avtomatik ajratadi (masalan: 8001, 8002...)
+    - Webhook URL va xavfsiz SECRET token yaratadi
+    - Nginx konfiguratsiyasini avtomatik yangilaydi
+    - Botni PM2 yoki fonda ishga tushiradi
+    """
+    ensure_instances_dir()
+    print("\n➕ --- YANGI MIJOZ BOTINI QO'SHISH (WEBHOOK REJIMI) ---\n")
     name = input("Mijoz nomi/ID (masalan: client_1, store_uz): ").strip()
     if not name:
         print("❌ Mijoz nomi kiritilmadi!")
         return
+
+    # Nomda noto'g'ri belgilar bo'lmasligi uchun
+    clean_name = "".join(c for c in name if c.isalnum() or c in ("_", "-"))
+    if clean_name != name:
+        print(f"⚠️ Nom to'g'rilandi: '{name}' -> '{clean_name}'")
+        name = clean_name
 
     inst_dir = get_instance_dir(name)
     if inst_dir.exists():
         print(f"❌ '{name}' nomli mijoz bot mavjud!")
         return
 
+    domain_prompt = input(f"Webhook domeni [{DEFAULT_DOMAIN}]: ").strip()
+    domain = domain_prompt or DEFAULT_DOMAIN
+
     bot_token = input("Bot Token (Telegram BotFather'dan): ").strip()
+    if not bot_token:
+        print("❌ Bot Token kiritilmadi!")
+        return
+
     admin_ids = input("Admin ID lari (vergul bilan) [7867633335]: ").strip() or "7867633335"
     contest_name = input("Konkurs nomi [Konkurs]: ").strip() or "Konkurs"
     prize_text = input("Sovrin matni [2 000 000 so'm]: ").strip() or "2 000 000 so'm"
     top_n = input("Top g'oliblar soni TOP_N [10]: ").strip() or "10"
     start_points = input("Boshlang'ich ball [5]: ").strip() or "5"
     referral_points = input("Referral ball [1]: ").strip() or "1"
+
+    # Bo'sh port va xavfsizlik tokeni generatsiyasi
+    port = get_next_available_port(start_port=8001)
+    webhook_secret = secrets.token_hex(16)
+    webhook_path = f"/webhook/{name}"
+    webhook_url = f"https://{domain}"
 
     inst_dir.mkdir(parents=True, exist_ok=True)
     env_path = inst_dir / ".env"
@@ -95,14 +159,26 @@ def add_instance() -> None:
         f"DB_TYPE=sqlite\n"
         f"DB_PATH={db_path.as_posix()}\n"
         f"RATE_LIMIT=1.5\n"
-        f"USE_WEBHOOK=false\n"
-        f"REDIS_URL=\n"
+        f"USE_WEBHOOK=true\n"
+        f"WEBHOOK_URL={webhook_url}\n"
+        f"WEBHOOK_PATH={webhook_path}\n"
+        f"WEBAPP_HOST=127.0.0.1\n"
+        f"WEBAPP_PORT={port}\n"
+        f"WEBHOOK_SECRET={webhook_secret}\n"
+        f"REDIS_URL=redis://127.0.0.1:6379/0\n"
     )
 
     with open(env_path, "w", encoding="utf-8") as f:
         f.write(env_content)
 
     print(f"\n✅ '{name}' uchun sozlamalar saqlandi: {env_path}")
+    print(f"🔌 Ajratilgan port: {port}")
+    print(f"🌐 Webhook manzili: {webhook_url}{webhook_path}")
+
+    # Nginx-ni avtomatik yangilash
+    sync_nginx_safe(domain)
+
+    # Botni ishga tushirish
     start_instance(name)
 
 
@@ -140,32 +216,34 @@ def start_instance(name: str) -> None:
     if pid_file.exists():
         try:
             old_pid = int(pid_file.read_text().strip())
-            # Hali ishlayaptimi?
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
-                capture_output=True, text=True
-            )
-            if str(old_pid) in result.stdout:
-                print(f"⚠️ '{name}' allaqachon ishlayapti (PID: {old_pid}). Avval stop qiling.")
-                return
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
+                    capture_output=True, text=True
+                )
+                if str(old_pid) in result.stdout:
+                    print(f"⚠️ '{name}' allaqachon ishlayapti (PID: {old_pid}). Avval stop qiling.")
+                    return
+            else:
+                try:
+                    os.kill(old_pid, 0)
+                    print(f"⚠️ '{name}' allaqachon ishlayapti (PID: {old_pid}). Avval stop qiling.")
+                    return
+                except OSError:
+                    pass
         except Exception:
             pass
 
     log_file = inst_dir / "bot.log"
 
-    # .env fayldan barcha o'zgaruvchilarni o'qib, to'g'ridan-to'g'ri env ga qo'shamiz.
-    # Bu ENV_FILE mexanizmiga tayanmaydi — ishonchli va universal yechim.
     env = os.environ.copy()
     env_vars = parse_env_file(env_path)
     env.update(env_vars)
-    # ENV_FILE ham qo'shib qo'yamiz (settings.py load_dotenv uchun, agar kerak bo'lsa)
     env["ENV_FILE"] = str(env_path)
     env["LOG_FILE"] = str(log_file)
-    env["PYTHONUNBUFFERED"] = "1"   # log ni darhol yozish uchun
+    env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
 
-    # Windows: pythonw.exe — konsolsiz, ota jarayondan to'liq mustaqil ishlaydi.
-    # Log faylga yozish uchun bot.py LOG_FILE env ni ishlatadi (FileHandler).
     if sys.platform == "win32":
         pythonw = Path(sys.executable).parent / "pythonw.exe"
         interpreter = str(pythonw) if pythonw.exists() else sys.executable
@@ -201,8 +279,8 @@ def stop_instance(name: str) -> None:
         print(f"⚠️ '{name}' bot PID fayli topilmadi (allaqachon to'xtatilgandir).")
         return
 
-    pid = int(pid_file.read_text().strip())
     try:
+        pid = int(pid_file.read_text().strip())
         if sys.platform == "win32":
             result = subprocess.run(
                 ["taskkill", "/F", "/PID", str(pid)],
@@ -280,9 +358,9 @@ def start_all_instances() -> None:
 
 
 def list_instances() -> None:
-    """Barcha bot instance'larni ro'yxatini ko'rsatadi."""
+    """Barcha bot instance'lar ro'yxatini va portlarini ko'rsatadi."""
     ensure_instances_dir()
-    dirs = [d for d in INSTANCES_DIR.iterdir() if d.is_dir()]
+    dirs = [d for d in INSTANCES_DIR.iterdir() if d.is_dir() and not d.name.startswith("__")]
     if not dirs:
         print("📂 Hali hech qanday mijoz boti yaratilmagan.")
         return
@@ -292,27 +370,41 @@ def list_instances() -> None:
         subprocess.run(["pm2", "list"])
     else:
         for d in sorted(dirs):
+            env_file = d / ".env"
+            env_data = parse_env_file(env_file) if env_file.exists() else {}
+            mode = "Webhook" if env_data.get("USE_WEBHOOK") == "true" else "Polling"
+            port = env_data.get("WEBAPP_PORT", "-")
+            path = env_data.get("WEBHOOK_PATH", "-")
+
             pid_file = d / "bot.pid"
             status = "🔴 To'xtatilgan"
             if pid_file.exists():
                 try:
                     pid = pid_file.read_text().strip()
-                    result = subprocess.run(
-                        ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                        capture_output=True, text=True
-                    )
-                    if pid in result.stdout:
-                        status = f"🟢 Ishlamoqda (PID: {pid})"
+                    if sys.platform == "win32":
+                        result = subprocess.run(
+                            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                            capture_output=True, text=True
+                        )
+                        if pid in result.stdout:
+                            status = f"🟢 Ishlamoqda (PID: {pid})"
+                        else:
+                            status = f"🔴 To'xtatilgan"
                     else:
-                        status = f"🔴 To'xtatilgan (eski PID: {pid})"
+                        try:
+                            os.kill(int(pid), 0)
+                            status = f"🟢 Ishlamoqda (PID: {pid})"
+                        except OSError:
+                            status = "🔴 To'xtatilgan"
                 except Exception:
-                    status = f"🟡 Noaniq"
-            print(f"  • {d.name}: {status}")
+                    status = "🟡 Noaniq"
+
+            print(f"  • {d.name:20} [{mode} | Port: {port:5} | Path: {path:20}] -> {status}")
     print()
 
 
 def remove_instance(name: str) -> None:
-    """Bot instance'ni to'xtatib, papkasini o'chiradi."""
+    """Bot instance'ni to'xtatib, papkasini o'chiradi va Nginx ni qayta yangilaydi."""
     inst_dir = get_instance_dir(name)
     if not inst_dir.exists():
         print(f"❌ '{name}' topilmadi.")
@@ -327,13 +419,21 @@ def remove_instance(name: str) -> None:
             subprocess.run(["pm2", "delete", f"bot_{name}"])
         shutil.rmtree(inst_dir, ignore_errors=True)
         print(f"🗑️  '{name}' o'chirib tashlandi.")
+        # Nginx dan ham o'chirish
+        sync_nginx_safe(DEFAULT_DOMAIN)
 
 
 def main() -> None:
     """CLI entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Multi-Bot Manager / Deployer Script")
+    if sys.platform == "win32":
+        if hasattr(sys.stdout, "buffer"):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "buffer"):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+    parser = argparse.ArgumentParser(description="Multi-Bot Webhook Manager / Deployer Script")
     parser.add_argument(
         "command",
         choices=[
@@ -346,10 +446,12 @@ def main() -> None:
             "restart-all",
             "start-all",
             "stop-all",
+            "sync-nginx",
         ],
-        help="Amal",
+        help="Bajariladigan amal",
     )
     parser.add_argument("name", nargs="?", help="Mijoz bot nomi (yoki 'all')")
+    parser.add_argument("--domain", default=DEFAULT_DOMAIN, help="Nginx uchun domen")
 
     args = parser.parse_args()
 
@@ -363,6 +465,8 @@ def main() -> None:
         start_all_instances()
     elif args.command == "stop-all":
         stop_all_instances()
+    elif args.command == "sync-nginx":
+        sync_nginx_safe(args.domain)
     elif args.command in ["start", "stop", "restart", "remove"]:
         if not args.name:
             print(

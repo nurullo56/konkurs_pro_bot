@@ -6,6 +6,8 @@
 #   ./deploy_hetzner.sh status      - Botlar holatini ko'rsatadi (PM2)
 #   ./deploy_hetzner.sh restart     - Barcha botlarni qayta ishga tushiradi
 #   ./deploy_hetzner.sh stop        - Barcha botlarni to'xtatadi
+#   ./deploy_hetzner.sh start       - Barcha botlarni ishga tushiradi
+#   ./deploy_hetzner.sh sync-nginx  - Nginx ni qayta sinxronlashtiradi va reload qiladi
 #   ./deploy_hetzner.sh logs [nomi] - Bot loglarini real vaqtda ko'rish
 #   ./deploy_hetzner.sh backup      - Zaxira nusxa (backup) yaratadi
 # ==============================================================================
@@ -40,6 +42,9 @@ case "$ACTION" in
         echo -e "${CYAN}📦 Kutubxonalar yangilanmoqda...${NC}"
         "$VENV_PYTHON" -m pip install -r requirements.txt
 
+        echo -e "${CYAN}🌐 Nginx marshrutlari sinxronlanmoqda...${NC}"
+        "$VENV_PYTHON" "$SCRIPT_DIR/deploy.py" sync-nginx
+
         echo -e "${CYAN}🚀 Botlar qayta ishga tushirilmoqda...${NC}"
         "$VENV_PYTHON" "$SCRIPT_DIR/deploy.py" restart-all
 
@@ -68,6 +73,11 @@ case "$ACTION" in
         if command -v pm2 &> /dev/null; then
             pm2 save || true
         fi
+        ;;
+
+    sync-nginx)
+        echo -e "${CYAN}🌐 Nginx konfiguratsiyasi sinxronlashtirilmoqda...${NC}"
+        "$VENV_PYTHON" "$SCRIPT_DIR/deploy.py" sync-nginx
         ;;
 
     status)
@@ -99,7 +109,7 @@ case "$ACTION" in
         ;;
 
     *)
-        echo -e "${YELLOW}Foydalanish: $0 {update|status|start|stop|restart|logs|backup}${NC}"
+        echo -e "${YELLOW}Foydalanish: $0 {update|status|start|stop|restart|sync-nginx|logs|backup}${NC}"
         exit 1
         ;;
 esac
