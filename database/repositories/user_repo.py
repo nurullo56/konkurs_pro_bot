@@ -38,6 +38,10 @@ class UserRepository(BaseRepository):
         if self.db.is_postgres and self.db.pg_pool:
             async with self.db.pg_pool.acquire() as conn:
                 async with conn.transaction():
+                    row = await conn.fetchrow("SELECT registered FROM users WHERE user_id = $1", user_id)
+                    if row and row["registered"]:
+                        return False, None
+
                     upsert_sql = """
                     INSERT INTO users (user_id, username, full_name, phone, referrer_id, points, registered)
                     VALUES ($1, $2, $3, $4, $5, $6, 1)
@@ -52,25 +56,32 @@ class UserRepository(BaseRepository):
                     if valid_referrer:
                         await conn.execute("UPDATE users SET points = points + $1 WHERE user_id = $2", referral_points, valid_referrer)
         elif self.db.sqlite_conn:
-            await self.db.sqlite_conn.execute("BEGIN IMMEDIATE")
-            try:
-                upsert_sql = """
-                INSERT INTO users (user_id, username, full_name, phone, referrer_id, points, registered)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    username  = excluded.username,
-                    full_name = excluded.full_name,
-                    phone     = excluded.phone,
-                    registered = 1,
-                    points = users.points + excluded.points
-                """
-                await self.db.sqlite_conn.execute(upsert_sql, (user_id, username, full_name, phone, valid_referrer, start_points))
-                if valid_referrer:
-                    await self.db.sqlite_conn.execute("UPDATE users SET points = points + ? WHERE user_id = ?", (referral_points, valid_referrer))
-                await self.db.sqlite_conn.commit()
-            except Exception:
-                await self.db.sqlite_conn.rollback()
-                raise
+            async with self.db.sqlite_lock:
+                await self.db.sqlite_conn.execute("BEGIN IMMEDIATE")
+                try:
+                    async with self.db.sqlite_conn.execute("SELECT registered FROM users WHERE user_id = ?", (user_id,)) as cur:
+                        row = await cur.fetchone()
+                        if row and row["registered"]:
+                            await self.db.sqlite_conn.rollback()
+                            return False, None
+
+                    upsert_sql = """
+                    INSERT INTO users (user_id, username, full_name, phone, referrer_id, points, registered)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        username  = excluded.username,
+                        full_name = excluded.full_name,
+                        phone     = excluded.phone,
+                        registered = 1,
+                        points = users.points + excluded.points
+                    """
+                    await self.db.sqlite_conn.execute(upsert_sql, (user_id, username, full_name, phone, valid_referrer, start_points))
+                    if valid_referrer:
+                        await self.db.sqlite_conn.execute("UPDATE users SET points = points + ? WHERE user_id = ?", (referral_points, valid_referrer))
+                    await self.db.sqlite_conn.commit()
+                except Exception:
+                    await self.db.sqlite_conn.rollback()
+                    raise
 
         return True, valid_referrer
 

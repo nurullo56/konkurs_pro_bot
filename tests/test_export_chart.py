@@ -117,3 +117,18 @@ class TestExportUsersToExcel:
         result = export_users_to_excel(users)
         assert isinstance(result, BufferedInputFile)
         assert len(result.data) > 5000  # 49 ta user = katta fayl
+
+    def test_formula_injection_sanitized(self):
+        """=, +, -, @ bilan boshlanuvchi yozuvlar formula injection'dan himoyalanishi kerak."""
+        import io
+        users = [self._make_user(1, "=cmd|'/C calc'!A0", 10)]
+        result = export_users_to_excel(users)
+        if result.filename.endswith(".xlsx"):
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(result.data))
+            ws = wb.active
+            values = [str(cell.value or "") for row in ws.iter_rows() for cell in row]
+            assert any(v.startswith("'=") for v in values)
+        else:
+            text = result.data.decode("utf-8-sig")
+            assert "'=" in text

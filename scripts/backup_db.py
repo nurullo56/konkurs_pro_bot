@@ -38,15 +38,26 @@ def backup_sqlite(db_path: str):
     temp_backup = os.path.join(BACKUP_DIR, f"temp_{timestamp}.db")
     zip_path = os.path.join(BACKUP_DIR, f"sqlite_backup_{timestamp}.zip")
 
-    # DB faylidan nusxa olish
-    shutil.copy2(db_path, temp_backup)
+    # SQLite online backup API orqali WAL va faol tranzaksiyalarni xavfsiz zaxiralash
+    import sqlite3
+    try:
+        source_conn = sqlite3.connect(db_path)
+        dest_conn = sqlite3.connect(temp_backup)
+        with dest_conn:
+            source_conn.backup(dest_conn)
+        dest_conn.close()
+        source_conn.close()
+    except Exception as e:
+        print(f"SQLite online backup ogohlantirishi ({e}), shutil.copy2 ishlatilmoqda...")
+        shutil.copy2(db_path, temp_backup)
     
     # Zip qilish
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(temp_backup, os.path.basename(db_path))
     
     # Temp faylni o'chirish
-    os.remove(temp_backup)
+    if os.path.exists(temp_backup):
+        os.remove(temp_backup)
     
     print(f"Muvaffaqiyatli saqlandi: {zip_path}")
     clean_old_backups("sqlite_backup")

@@ -154,6 +154,8 @@ async def _execute_broadcast(
     total = len(user_ids)
     sent = failed = blocked = skipped = 0
     start_time = time.monotonic()
+    last_status_update = 0.0
+    MIN_STATUS_UPDATE_INTERVAL = 2.5  # Kamida 2.5s oralig'ida tahrirlash (Telegram 429 flood'dan himoya)
 
     for idx, uid in enumerate(user_ids, 1):
         # Global timeout
@@ -185,7 +187,9 @@ async def _execute_broadcast(
         else:
             failed += 1
 
-        if idx % PROGRESS_UPDATE_EVERY == 0 or idx == total:
+        now = time.monotonic()
+        if (now - last_status_update >= MIN_STATUS_UPDATE_INTERVAL and idx % PROGRESS_UPDATE_EVERY == 0) or idx == total:
+            last_status_update = now
             elapsed_str = f"{int(elapsed)}s"
             try:
                 await status_message.edit_text(

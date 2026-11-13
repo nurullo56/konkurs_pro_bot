@@ -32,6 +32,49 @@ async def test_participate():
     message.answer.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_show_main_menu_regular_user():
+    """Oddiy (admin bo'lmagan) foydalanuvchi uchun _show_main_menu xatosiz ishlashi kerak."""
+    from handlers.user.registration import _show_main_menu
+    message = MagicMock()
+    message.from_user = MagicMock(id=111222333, full_name="Regular User")
+    message.answer = AsyncMock()
+    db = MagicMock()
+    db.admins = AsyncMock()
+    db.admins.is_admin.return_value = False
+
+    await _show_main_menu(message, db=db, full_name="Regular User")
+    message.answer.assert_called_once()
+    assert "Assalomu alaykum" in message.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_start_already_registered_regular_user():
+    """Ro'yxatdan o'tgan oddiy foydalanuvchi /start bosganda _show_main_menu chaqirilishi kerak."""
+    from handlers.user.registration import start
+    message = MagicMock()
+    message.from_user = MagicMock(id=444555666, full_name="Test User")
+    loading_msg = AsyncMock()
+    loading_msg.delete = AsyncMock()
+    message.answer = AsyncMock(return_value=loading_msg)
+    
+    db = MagicMock()
+    db.users = AsyncMock()
+    db.users.get_by_id.return_value = {"full_name": "Test User", "registered": 1}
+    db.admins = AsyncMock()
+    db.admins.is_admin.return_value = False
+
+    command = MagicMock()
+    command.args = None
+    bot = AsyncMock()
+    state = AsyncMock()
+
+    await start(message, command, bot, db, state, "test_bot")
+    loading_msg.delete.assert_called_once()
+    # message.answer kamida 2 marta chaqirilgan (loading_msg + main_menu)
+    assert message.answer.call_count >= 2
+
+
 def test_main_menu_kb():
     from keyboards.user import BTN_ADMIN, main_menu_kb
 

@@ -109,16 +109,17 @@ async def main() -> None:
         dp["bot_username"] = me.username
         logging.info(f"Bot started: @{me.username}")
 
+        drop_updates = _os.getenv("DROP_PENDING_UPDATES", "false").lower() == "true"
         if config.use_webhook:
             url = f"{config.webhook_url}{config.webhook_path}"
             await bot.set_webhook(
                 url=url,
                 secret_token=config.webhook_secret,
-                drop_pending_updates=True
+                drop_pending_updates=drop_updates
             )
-            logging.info(f"Webhook set to {url}")
+            logging.info(f"Webhook set to {url} (drop_pending_updates={drop_updates})")
         else:
-            await bot.delete_webhook(drop_pending_updates=True)
+            await bot.delete_webhook(drop_pending_updates=drop_updates)
 
     dp.startup.register(on_startup)
 

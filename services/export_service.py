@@ -5,6 +5,13 @@ from typing import Any, Dict, List
 from aiogram.types import BufferedInputFile
 
 
+def _sanitize_cell(val: Any) -> Any:
+    """Prepend single quote if string starts with formula characters (=, +, -, @)."""
+    if isinstance(val, str) and val.startswith(("=", "+", "-", "@")):
+        return f"'{val}"
+    return val
+
+
 def export_users_to_excel(users_data: List[Dict[str, Any]]) -> BufferedInputFile:
     """
     Exports users list to an Excel (.xlsx) file using openpyxl or pandas.
@@ -43,9 +50,9 @@ def export_users_to_excel(users_data: List[Dict[str, Any]]) -> BufferedInputFile
             status = "🚫 Bloklangan" if user.get("is_banned") else "✅ Faol"
             ws.append([
                 user.get("user_id"),
-                user.get("full_name") or "",
-                f"@{user.get('username')}" if user.get("username") else "",
-                user.get("phone") or "",
+                _sanitize_cell(user.get("full_name") or ""),
+                _sanitize_cell(f"@{user.get('username')}" if user.get("username") else ""),
+                _sanitize_cell(user.get("phone") or ""),
                 user.get("points", 0),
                 user.get("referrer_id") or "",
                 str(user.get("joined_at") or ""),
@@ -77,9 +84,9 @@ def export_users_to_excel(users_data: List[Dict[str, Any]]) -> BufferedInputFile
             status = "Banned" if u.get("is_banned") else "Active"
             writer.writerow([
                 u.get("user_id"),
-                u.get("full_name") or "",
-                u.get("username") or "",
-                u.get("phone") or "",
+                _sanitize_cell(u.get("full_name") or ""),
+                _sanitize_cell(u.get("username") or ""),
+                _sanitize_cell(u.get("phone") or ""),
                 u.get("points", 0),
                 u.get("referrer_id") or "",
                 u.get("joined_at") or "",

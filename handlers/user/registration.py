@@ -112,7 +112,21 @@ async def begin_registration(
 
 import html
 
-async def _show_main_menu(message: Message, full_name: str | None = None) -> None:
+
+async def _is_admin(user_id: int | None, db: Database | None = None) -> bool:
+    """Foydalanuvchi admin huquqiga ega ekanligini xavfsiz tekshiradi."""
+    if not user_id:
+        return False
+    if user_id in config.admin_ids:
+        return True
+    if db is not None and hasattr(db, "admins"):
+        return await db.admins.is_admin(user_id)
+    return False
+
+
+async def _show_main_menu(
+    message: Message, db: Database | None = None, full_name: str | None = None
+) -> None:
     """Asosiy menyuni ko'rsatadi."""
     name = full_name or (message.from_user.full_name if message.from_user else "")
     name = html.escape(name)
@@ -123,13 +137,7 @@ async def _show_main_menu(message: Message, full_name: str | None = None) -> Non
         name_str = f" {name}"
     else:
         name_str = ""
-    is_admin = bool(
-        message.from_user
-        and (
-            message.from_user.id in config.admin_ids
-            or (hasattr(db, "admins") and await db.admins.is_admin(message.from_user.id))
-        )
-    )
+    is_admin = await _is_admin(user_id, db)
     await message.answer(
         f"Assalomu alaykum{name_str} 👋\nQuyidagi menyudan kerakli bo'limni tanlang 👇",
         reply_markup=main_menu_kb(is_admin=is_admin),
@@ -159,7 +167,7 @@ async def start(
             await loading_msg.delete()
         except Exception as e:
             logging.debug(f"Failed to delete loading_msg: {e}")
-        await _show_main_menu(message, full_name=name)
+        await _show_main_menu(message, db=db, full_name=name)
         return
 
     referrer_id = int(command.args) if command.args and command.args.isdigit() else None
@@ -208,13 +216,7 @@ async def receive_contact(
     await state.clear()
 
     if not result.is_new:
-        is_admin = bool(
-            message.from_user
-            and (
-                message.from_user.id in config.admin_ids
-                or (hasattr(db, "admins") and await db.admins.is_admin(message.from_user.id))
-            )
-        )
+        is_admin = await _is_admin(message.from_user.id if message.from_user else None, db)
         await message.answer("Siz allaqachon ro'yxatdan o'tgansiz.", reply_markup=main_menu_kb(is_admin=is_admin))
         return
 
@@ -240,13 +242,7 @@ async def receive_contact(
             logging.warning(f"Could not send referral notification to user {result.referrer_id}: {e}")
 
     link = _referral_link(bot_username, message.from_user.id)
-    is_admin = bool(
-        message.from_user
-        and (
-            message.from_user.id in config.admin_ids
-            or (hasattr(db, "admins") and await db.admins.is_admin(message.from_user.id))
-        )
-    )
+    is_admin = await _is_admin(message.from_user.id if message.from_user else None, db)
     await message.answer(
         f"🎉 Tabriklaymiz! Siz loyihamizga to'liq ro'yxatdan o'tdingiz va "
         f"boshlang'ich {config.start_points} ballga ega bo'ldingiz!\n\n"

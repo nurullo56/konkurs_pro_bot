@@ -212,6 +212,8 @@ class Database:
         self.sqlite_conn = await aiosqlite.connect(self.path)
         self.sqlite_conn.row_factory = aiosqlite.Row
         await self.sqlite_conn.execute("PRAGMA journal_mode=WAL")
+        await self.sqlite_conn.execute("PRAGMA busy_timeout=60000")
+        await self.sqlite_conn.execute("PRAGMA synchronous=NORMAL")
         await self.sqlite_conn.execute("PRAGMA foreign_keys=ON")
         await self.sqlite_conn.executescript(SQLITE_SCHEMA)
         await self.sqlite_conn.commit()
@@ -326,9 +328,10 @@ class Database:
                 row = await conn.fetchrow(sql, *args)
                 return dict(row) if row else None
         elif self.sqlite_conn:
-            async with self.sqlite_conn.execute(sql, args) as cur:
-                row = await cur.fetchone()
-                return dict(row) if row else None
+            async with self.sqlite_lock:
+                async with self.sqlite_conn.execute(sql, args) as cur:
+                    row = await cur.fetchone()
+                    return dict(row) if row else None
         return None
 
     async def fetch(self, sql: str, *args: Any) -> List[Dict[str, Any]]:
@@ -348,7 +351,8 @@ class Database:
                 rows = await conn.fetch(sql, *args)
                 return [dict(r) for r in rows]
         elif self.sqlite_conn:
-            async with self.sqlite_conn.execute(sql, args) as cur:
-                rows = await cur.fetchall()
-                return [dict(r) for r in rows]
+            async with self.sqlite_lock:
+                async with self.sqlite_conn.execute(sql, args) as cur:
+                    rows = await cur.fetchall()
+                    return [dict(r) for r in rows]
         return []
