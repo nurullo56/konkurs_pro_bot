@@ -24,3 +24,4 @@ class JoinRequestRepository(BaseRepository):
             user_id, chat_id
         )
         return row is not None
+        
